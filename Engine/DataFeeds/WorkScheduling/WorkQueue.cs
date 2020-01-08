@@ -79,7 +79,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
             {
                 if (_workQueue.Count != 0)
                 {
-                    potentialWorkItem = _workQueue[0];
+                    potentialWorkItem = _workQueue[_workQueue.Count - 1];
 
                     // if the weight is at its maximum value return null
                     // this is useful to space out in time this work

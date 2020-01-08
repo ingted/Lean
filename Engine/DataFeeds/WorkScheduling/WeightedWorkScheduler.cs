@@ -44,6 +44,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
         internal static int MaxWorkWeight;
 
         private readonly ConcurrentQueue<WorkItem> _newWork;
+        private readonly AutoResetEvent _newWorkEvent;
 
         /// <summary>
         /// Singleton instance
@@ -53,6 +54,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
         private WeightedWorkScheduler()
         {
             _newWork = new ConcurrentQueue<WorkItem>();
+            _newWorkEvent = new AutoResetEvent(false);
 
             var work = new List<WorkQueue>();
             var queueManager = new Thread(() =>
@@ -65,7 +67,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
                 {
                     var workQueue = new WorkQueue();
                     work.Add(workQueue);
-                    var thread = new Thread(() => WorkerThread(workQueue, _newWork))
+                    var thread = new Thread(() => WorkerThread(workQueue, _newWork, _newWorkEvent))
                     {
                         IsBackground = true,
                         Priority = ThreadPriority.Lowest,
@@ -100,13 +102,14 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
         public void QueueWork(Func<int, bool> workFunc, Func<int> weightFunc)
         {
             _newWork.Enqueue(new WorkItem(workFunc, weightFunc));
+            _newWorkEvent.Set();
         }
 
         /// <summary>
         /// This is the worker thread loop.
         /// It will first try to take a work item from the new work queue else will check his own queue.
         /// </summary>
-        private static void WorkerThread(WorkQueue workQueue, ConcurrentQueue<WorkItem> newWork)
+        private static void WorkerThread(WorkQueue workQueue, ConcurrentQueue<WorkItem> newWork, AutoResetEvent newWorkEvent)
         {
             while (true)
             {
@@ -117,7 +120,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
                     if (workItem == null)
                     {
                         // no work to do, lets sleep and try again
-                        Thread.Sleep(TimeSpan.FromMilliseconds(1));
+                        newWorkEvent.WaitOne(1);
                         continue;
                     }
                 }
