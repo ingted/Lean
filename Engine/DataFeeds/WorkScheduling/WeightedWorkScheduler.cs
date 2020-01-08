@@ -43,7 +43,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
         /// <remarks>This is useful to limit RAM and CPU usage</remarks>
         internal static int MaxWorkWeight;
 
-        private readonly ConcurrentQueue<WorkItem> _newWork;
+        private readonly BlockingCollection<WorkItem> _newWork;
 
         /// <summary>
         /// Singleton instance
@@ -52,7 +52,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
 
         private WeightedWorkScheduler()
         {
-            _newWork = new ConcurrentQueue<WorkItem>();
+            _newWork = new BlockingCollection<WorkItem>();
 
             var work = new List<WorkQueue>();
             var queueManager = new Thread(() =>
@@ -99,26 +99,29 @@ namespace QuantConnect.Lean.Engine.DataFeeds.WorkScheduling
         /// Work will be sorted in ascending order based on this weight</param>
         public void QueueWork(Func<int, bool> workFunc, Func<int> weightFunc)
         {
-            _newWork.Enqueue(new WorkItem(workFunc, weightFunc));
+            _newWork.Add(new WorkItem(workFunc, weightFunc));
         }
 
         /// <summary>
         /// This is the worker thread loop.
         /// It will first try to take a work item from the new work queue else will check his own queue.
         /// </summary>
-        private static void WorkerThread(WorkQueue workQueue, ConcurrentQueue<WorkItem> newWork)
+        private static void WorkerThread(WorkQueue workQueue, BlockingCollection<WorkItem> newWork)
         {
             while (true)
             {
                 WorkItem workItem;
-                if (!newWork.TryDequeue(out workItem))
+                if (!newWork.TryTake(out workItem))
                 {
                     workItem = workQueue.Get();
                     if (workItem == null)
                     {
-                        // no work to do, lets sleep and try again
-                        Thread.Sleep(TimeSpan.FromMilliseconds(1));
-                        continue;
+                        // no work to do, lets sleep and try again but monitor for new work too
+                        if (!newWork.TryTake(out workItem, 1))
+                        {
+                            continue;
+                        }
+                        workQueue.Add(workItem);
                     }
                 }
                 else
